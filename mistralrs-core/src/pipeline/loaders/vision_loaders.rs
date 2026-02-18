@@ -30,8 +30,8 @@ use crate::pipeline::isq::IsqModelLoader;
 use crate::pipeline::loaders::AutoDeviceMapParams;
 use crate::pipeline::text_models_inputs_processor::{FlashParams, PagedAttentionInputMetadata};
 use crate::pipeline::{
-    EitherCache, IsqModel, Modalities, MultimodalPromptPrefixer, Processor, ProcessorCreator,
-    SupportedModality,
+    BasicProcessor, EitherCache, IsqModel, Modalities, MultimodalPromptPrefixer, Processor,
+    ProcessorCreator, SupportedModality,
 };
 use crate::utils::varbuilder_utils::DeviceForLoadTensor;
 use crate::vision_models::clip::ClipConfig;
@@ -3627,11 +3627,13 @@ impl VisionModelLoader for Gemma3Loader {
         _max_edge: Option<u32>,
     ) -> Arc<dyn Processor + Send + Sync> {
         let config: Gemma3Config = serde_json::from_str(config).unwrap();
-        // Handle the Gemma 3 1b case here
-        Arc::new(Gemma3Processor::new(
-            processor_config.unwrap_or_default(),
-            matches!(config, Gemma3Config::WithVision { .. }),
-        ))
+        match config {
+            Gemma3Config::WithVision { .. } => Arc::new(Gemma3Processor::new(
+                processor_config.unwrap_or_default(),
+                true,
+            )),
+            Gemma3Config::Text(_) => Arc::new(BasicProcessor),
+        }
     }
     fn supports_paged_attention(&self, _config: &str) -> bool {
         true
@@ -3642,10 +3644,17 @@ impl VisionModelLoader for Gemma3Loader {
     fn prefixer(&self, _config: &str) -> Arc<dyn MultimodalPromptPrefixer> {
         Arc::new(Gemma3Prefixer)
     }
-    fn modalities(&self, _config: &str) -> Result<Modalities> {
-        Ok(Modalities {
-            input: vec![SupportedModality::Text, SupportedModality::Vision],
-            output: vec![SupportedModality::Text],
+    fn modalities(&self, config: &str) -> Result<Modalities> {
+        let config: Gemma3Config = serde_json::from_str(config)?;
+        Ok(match config {
+            Gemma3Config::WithVision { .. } => Modalities {
+                input: vec![SupportedModality::Text, SupportedModality::Vision],
+                output: vec![SupportedModality::Text],
+            },
+            Gemma3Config::Text(_) => Modalities {
+                input: vec![SupportedModality::Text],
+                output: vec![SupportedModality::Text],
+            },
         })
     }
 }

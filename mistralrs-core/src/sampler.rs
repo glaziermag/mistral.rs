@@ -1,11 +1,13 @@
 #![allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet},
     sync::{Arc, LazyLock, Mutex},
 };
 
 use candle_core::{DType, Device, Error, Result, Tensor, D};
+use mistralrs_quant::log::once_log_warn;
 use mistralrs_quant::{CumSumOp, SortOp};
 #[cfg(feature = "pyo3_macros")]
 use pyo3::pyclass;
@@ -268,6 +270,58 @@ fn argmax_f32(values: &[f32]) -> u32 {
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(i, _)| i as u32)
         .unwrap_or(0)
+}
+
+/// Find the index of the maximum finite element in a slice, falling back to index 0.
+#[inline]
+fn argmax_finite_f32(values: &[f32]) -> u32 {
+    values
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| v.is_finite().then_some((i, *v)))
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, _)| i as u32)
+        .unwrap_or(0)
+}
+
+/// Build a valid probability vector for sampling by zeroing non-finite/negative values.
+///
+/// Returns `None` when all values are already finite and positive.
+fn sanitize_probs_for_sampling(probs: &[f32]) -> Option<Vec<f32>> {
+    let mut changed = false;
+    let mut has_positive = false;
+    let mut sanitized = Vec::with_capacity(probs.len());
+
+    for prob in probs {
+        let next = if prob.is_finite() && *prob > 0.0 {
+            *prob
+        } else {
+            if *prob != 0.0 {
+                changed = true;
+            }
+            0.0
+        };
+        if next != *prob {
+            changed = true;
+        }
+        has_positive |= next > 0.0;
+        sanitized.push(next);
+    }
+
+    if !changed && has_positive {
+        return None;
+    }
+
+    if has_positive {
+        let sum = sanitized.iter().sum::<f32>();
+        if sum > 0.0 {
+            for prob in &mut sanitized {
+                *prob /= sum;
+            }
+        }
+    }
+
+    Some(sanitized)
 }
 
 impl Sampler {
@@ -649,11 +703,59 @@ impl Sampler {
         return_logprobs: bool,
         rng: Arc<Mutex<Isaac64Rng>>,
     ) -> Result<Logprobs> {
-        let distr = WeightedIndex::new(probs).map_err(Error::wrap)?;
+        let mut sampling_probs = Cow::Borrowed(probs);
+
+        let distr = match WeightedIndex::new(sampling_probs.as_ref()) {
+            Ok(distr) => distr,
+            Err(original_err) => {
+                if let Some(sanitized) = sanitize_probs_for_sampling(sampling_probs.as_ref()) {
+                    if sanitized.iter().any(|prob| *prob > 0.0) {
+                        if let Ok(distr) = WeightedIndex::new(&sanitized) {
+                            once_log_warn("Encountered invalid sampling weights (non-finite/negative); sanitized probabilities before multinomial sampling.");
+                            sampling_probs = Cow::Owned(sanitized);
+                            distr
+                        } else {
+                            once_log_warn("Encountered invalid sampling weights and could not recover a multinomial distribution; falling back to argmax.");
+                            let next_token = argmax_finite_f32(probs) as usize;
+                            return self.sample_from_fallback_probs(
+                                &sanitized,
+                                return_logprobs,
+                                next_token,
+                            );
+                        }
+                    } else {
+                        once_log_warn("Encountered an all-zero/invalid sampling distribution; falling back to argmax.");
+                        let fallback_probs = sanitized;
+                        let next_token = argmax_finite_f32(probs) as usize;
+                        return self.sample_from_fallback_probs(
+                            &fallback_probs,
+                            return_logprobs,
+                            next_token,
+                        );
+                    }
+                } else {
+                    return Err(Error::wrap(original_err));
+                }
+            }
+        };
 
         let mut mut_ref_rng = &mut *rng.lock().expect("could not lock rng mutex");
         let next_token = distr.sample(&mut mut_ref_rng); // "Find the first item which has a weight *higher* than the chosen weight."
-        let logprob = probs[next_token].log(10.0);
+        self.sample_from_fallback_probs(sampling_probs.as_ref(), return_logprobs, next_token)
+    }
+
+    fn sample_from_fallback_probs(
+        &self,
+        probs: &[f32],
+        return_logprobs: bool,
+        next_token: usize,
+    ) -> Result<Logprobs> {
+        let selected_prob = probs.get(next_token).copied().unwrap_or(0.0);
+        let logprob = if selected_prob.is_finite() && selected_prob > 0.0 {
+            selected_prob.log10()
+        } else {
+            f32::NEG_INFINITY
+        };
 
         let top_logprobs = if return_logprobs {
             Some(self.get_top_logprobs(probs)?)
@@ -1039,5 +1141,63 @@ mod tests {
         assert_eq!(res.token, 1023);
         assert_eq!(res.top_logprobs, None);
         assert_eq!(res.logprob, 1023f64.log(10.) as f32)
+    }
+
+    #[test]
+    fn test_sample_multinomial_sanitizes_invalid_probs() {
+        use super::Sampler;
+        use rand::SeedableRng;
+        use rand_isaac::Isaac64Rng;
+        use std::sync::Arc;
+        use std::sync::Mutex;
+
+        let sampler = Sampler::new(
+            Some(0.8),
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0,
+            1.0,
+            0.0,
+            vec![],
+        )
+        .unwrap();
+
+        let probs = vec![f32::NAN, -1.0, 0.0, 0.5];
+        let rng = Arc::new(Mutex::new(Isaac64Rng::seed_from_u64(42)));
+        let sampled = sampler.sample_multinomial(&probs, false, rng).unwrap();
+        assert_eq!(sampled.token, 3);
+    }
+
+    #[test]
+    fn test_sample_multinomial_falls_back_on_all_invalid_probs() {
+        use super::Sampler;
+        use rand::SeedableRng;
+        use rand_isaac::Isaac64Rng;
+        use std::sync::Arc;
+        use std::sync::Mutex;
+
+        let sampler = Sampler::new(
+            Some(0.8),
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0,
+            1.0,
+            0.0,
+            vec![],
+        )
+        .unwrap();
+
+        let probs = vec![f32::NAN, f32::INFINITY, -1.0, 0.0];
+        let rng = Arc::new(Mutex::new(Isaac64Rng::seed_from_u64(42)));
+        let sampled = sampler.sample_multinomial(&probs, false, rng).unwrap();
+        assert_eq!(sampled.token, 3);
     }
 }
