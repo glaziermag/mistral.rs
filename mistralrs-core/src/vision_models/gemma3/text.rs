@@ -27,6 +27,32 @@ use crate::{
 
 use super::config::Gemma3TextConfig;
 
+fn normalized_softcap_f32(value: Option<f64>, field: &str) -> Option<f32> {
+    value.and_then(|softcap| {
+        if softcap.is_finite() && softcap > 0.0 {
+            Some(softcap as f32)
+        } else {
+            tracing::warn!(
+                "Ignoring invalid Gemma3 `{field}` value ({softcap}); expected a finite value > 0.0."
+            );
+            None
+        }
+    })
+}
+
+fn normalized_softcap_f64(value: Option<f64>, field: &str) -> Option<f64> {
+    value.and_then(|softcap| {
+        if softcap.is_finite() && softcap > 0.0 {
+            Some(softcap)
+        } else {
+            tracing::warn!(
+                "Ignoring invalid Gemma3 `{field}` value ({softcap}); expected a finite value > 0.0."
+            );
+            None
+        }
+    })
+}
+
 macro_rules! is_sliding {
     ($layer_idx:expr, $cfg:expr) => {
         ($layer_idx + 1) % $cfg.sliding_window_pattern != 0
@@ -140,7 +166,10 @@ impl Attention {
                     cfg.num_attention_heads,
                     comm,
                 ),
-                softcap: cfg.attn_logit_softcapping.map(|x| x as f32),
+                softcap: normalized_softcap_f32(
+                    cfg.attn_logit_softcapping,
+                    "attn_logit_softcapping",
+                ),
                 softmax_scale: 1.0 / (cfg.query_pre_attn_scalar as f32).sqrt(),
                 sliding_window,
                 sinks: None,
@@ -537,7 +566,10 @@ impl TextModel {
             cache: EitherCache::Normal(NormalCache::from_types(cache_types)),
             max_seq_len: cfg.max_position_embeddings,
             sliding_window: cfg.sliding_window,
-            final_logit_softcapping: cfg.final_logit_softcapping,
+            final_logit_softcapping: normalized_softcap_f64(
+                cfg.final_logit_softcapping,
+                "final_logit_softcapping",
+            ),
             cfg: ModelConfigMetadata {
                 max_seq_len: cfg.max_position_embeddings,
                 num_layers: cfg.num_hidden_layers,

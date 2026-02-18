@@ -28,6 +28,19 @@ use crate::{
 
 use super::config::{Gemma3nTextConfig, IntermediateSize};
 
+fn normalized_softcap_f64(value: Option<f64>, field: &str) -> Option<f64> {
+    value.and_then(|softcap| {
+        if softcap.is_finite() && softcap > 0.0 {
+            Some(softcap)
+        } else {
+            tracing::warn!(
+                "Ignoring invalid Gemma3n `{field}` value ({softcap}); expected a finite value > 0.0."
+            );
+            None
+        }
+    })
+}
+
 macro_rules! is_sliding {
     ($layer_idx:expr, $cfg:expr) => {
         $cfg.layer_types[$layer_idx] == "sliding_attention"
@@ -1233,7 +1246,10 @@ impl TextModel {
             per_layer_model_projection,
             per_layer_projection_norm,
             hidden_size_per_layer_input: cfg.hidden_size_per_layer_input,
-            final_logit_softcapping: cfg.final_logit_softcapping,
+            final_logit_softcapping: normalized_softcap_f64(
+                cfg.final_logit_softcapping,
+                "final_logit_softcapping",
+            ),
         })
     }
 
