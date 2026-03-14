@@ -57,7 +57,10 @@ function showError(message) {
   const logEl = document.getElementById('log');
   const errorDiv = document.createElement('div');
   errorDiv.className = 'msg error-msg';
-  errorDiv.innerHTML = `<strong>Error:</strong> ${message}`;
+  const strong = document.createElement('strong');
+  strong.textContent = 'Error: ';
+  errorDiv.appendChild(strong);
+  errorDiv.appendChild(document.createTextNode(message));
   logEl.appendChild(errorDiv);
   logEl.scrollTop = logEl.scrollHeight;
 }
