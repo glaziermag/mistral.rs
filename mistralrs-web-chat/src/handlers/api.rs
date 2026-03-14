@@ -619,3 +619,56 @@ pub async fn generate_speech(
             .into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_text_upload_missing_filename() {
+        let result = validate_text_upload(None, Some("text/plain"));
+        assert_eq!(result, Err("No filename provided"));
+    }
+
+    #[test]
+    fn test_validate_text_upload_valid_filename() {
+        let result = validate_text_upload(Some("file.txt"), Some("text/plain"));
+        assert_eq!(result, Ok("txt".to_string()));
+    }
+
+    #[test]
+    fn test_validate_text_upload_no_extension() {
+        let result = validate_text_upload(Some("Makefile"), Some("text/plain"));
+        assert_eq!(result, Ok("makefile".to_string()));
+    }
+
+    #[test]
+    fn test_validate_text_upload_unsupported_format() {
+        let result = validate_text_upload(Some("file.bin"), Some("application/octet-stream"));
+        assert_eq!(result, Err("Unsupported text file format"));
+    }
+
+    #[test]
+    fn test_validate_image_upload_missing_filename() {
+        let result = validate_image_upload(None, Some("image/jpeg"));
+        assert_eq!(result, Err("No filename provided"));
+    }
+
+    #[test]
+    fn test_validate_image_upload_valid_filename() {
+        let result = validate_image_upload(Some("image.jpg"), Some("image/jpeg"));
+        assert_eq!(result, Ok("jpg".to_string()));
+    }
+
+    #[test]
+    fn test_validate_audio_upload_missing_filename() {
+        let result = validate_audio_upload(None, Some("audio/mpeg"));
+        assert_eq!(result, Err("No filename provided"));
+    }
+
+    #[test]
+    fn test_validate_audio_upload_valid_filename() {
+        let result = validate_audio_upload(Some("audio.mp3"), Some("audio/mpeg"));
+        assert_eq!(result, Ok("mp3".to_string()));
+    }
+}
