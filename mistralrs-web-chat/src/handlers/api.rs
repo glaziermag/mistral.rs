@@ -619,3 +619,74 @@ pub async fn generate_speech(
             .into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_audio_upload() {
+        // Valid cases
+        assert_eq!(validate_audio_upload(Some("test.wav"), Some("audio/wav")), Ok("wav".to_string()));
+        assert_eq!(validate_audio_upload(Some("test.MP3"), Some("audio/mpeg")), Ok("mp3".to_string()));
+        assert_eq!(validate_audio_upload(Some("test.ogg"), None), Ok("ogg".to_string()));
+
+        // Invalid MIME type
+        assert_eq!(validate_audio_upload(Some("test.wav"), Some("video/mp4")), Err("File must be an audio file"));
+
+        // Missing filename
+        assert_eq!(validate_audio_upload(None, Some("audio/wav")), Err("No filename provided"));
+
+        // Missing extension
+        assert_eq!(validate_audio_upload(Some("test"), Some("audio/wav")), Err("Unsupported audio format"));
+
+        // Unsupported extension
+        assert_eq!(validate_audio_upload(Some("test.txt"), Some("audio/wav")), Err("Unsupported audio format"));
+    }
+
+    #[test]
+    fn test_validate_image_upload() {
+        // Valid cases
+        assert_eq!(validate_image_upload(Some("test.png"), Some("image/png")), Ok("png".to_string()));
+        assert_eq!(validate_image_upload(Some("test.JPG"), Some("image/jpeg")), Ok("jpg".to_string()));
+        assert_eq!(validate_image_upload(Some("test.webp"), None), Ok("webp".to_string()));
+
+        // Invalid MIME type
+        assert_eq!(validate_image_upload(Some("test.png"), Some("text/plain")), Err("File must be an image"));
+
+        // Missing filename
+        assert_eq!(validate_image_upload(None, Some("image/png")), Err("No filename provided"));
+
+        // Missing extension
+        assert_eq!(validate_image_upload(Some("test"), Some("image/png")), Err("Unsupported image format"));
+
+        // Unsupported extension
+        assert_eq!(validate_image_upload(Some("test.pdf"), Some("image/png")), Err("Unsupported image format"));
+    }
+
+    #[test]
+    fn test_validate_text_upload() {
+        // Valid cases - Text files
+        assert_eq!(validate_text_upload(Some("test.txt"), Some("text/plain")), Ok("txt".to_string()));
+        assert_eq!(validate_text_upload(Some("test.json"), Some("application/json")), Ok("json".to_string()));
+        assert_eq!(validate_text_upload(Some("test.js"), Some("application/javascript")), Ok("js".to_string()));
+        assert_eq!(validate_text_upload(Some("test.py"), Some("application/x-python")), Ok("py".to_string()));
+        assert_eq!(validate_text_upload(Some("test.rs"), Some("application/x-rust")), Ok("rs".to_string()));
+
+        // Valid cases - No extension but recognized filenames
+        assert_eq!(validate_text_upload(Some("Makefile"), None), Ok("makefile".to_string()));
+        assert_eq!(validate_text_upload(Some("Dockerfile"), None), Ok("dockerfile".to_string()));
+
+        // Invalid MIME type
+        assert_eq!(validate_text_upload(Some("test.txt"), Some("image/png")), Err("File must be a text file"));
+
+        // Missing filename
+        assert_eq!(validate_text_upload(None, Some("text/plain")), Err("No filename provided"));
+
+        // Missing extension and unrecognized filename
+        assert_eq!(validate_text_upload(Some("test"), Some("text/plain")), Err("Unsupported text file format"));
+
+        // Unsupported extension
+        assert_eq!(validate_text_upload(Some("test.exe"), Some("text/plain")), Err("Unsupported text file format"));
+    }
+}
