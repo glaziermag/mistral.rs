@@ -619,3 +619,60 @@ pub async fn generate_speech(
             .into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{header, Request, StatusCode},
+        routing::post,
+        Router,
+    };
+    use std::sync::Arc;
+    use indexmap::IndexMap;
+    use tokio::sync::RwLock;
+    use crate::types::{AppState, GenerationParams};
+    use tower::ServiceExt;
+
+    fn create_mock_app_state() -> Arc<AppState> {
+        Arc::new(AppState {
+            models: IndexMap::new(),
+            current: RwLock::new(None),
+            chats_dir: "mock_chats".to_string(),
+            speech_dir: "mock_speech".to_string(),
+            current_chat: RwLock::new(None),
+            next_chat_id: RwLock::new(0),
+            default_params: GenerationParams::default(),
+            search_enabled: false,
+        })
+    }
+
+    #[tokio::test]
+    async fn test_upload_image_no_field() {
+        let app_state = create_mock_app_state();
+        let app = Router::new()
+            .route("/upload_image", post(upload_image))
+            .with_state(app_state);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/upload_image")
+            .header(
+                header::CONTENT_TYPE,
+                "multipart/form-data; boundary=------------------------1234567890",
+            )
+            .body(Body::from(
+                "--------------------------1234567890\r\n\
+                 Content-Disposition: form-data; name=\"not_image\"; filename=\"test.txt\"\r\n\
+                 Content-Type: text/plain\r\n\
+                 \r\n\
+                 dummy content\r\n\
+                 --------------------------1234567890--\r\n",
+            ))
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}
