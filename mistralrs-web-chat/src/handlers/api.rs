@@ -619,3 +619,103 @@ pub async fn generate_speech(
             .into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::post,
+        Router,
+    };
+    use indexmap::IndexMap;
+    use tokio::sync::RwLock;
+    use tower::ServiceExt;
+
+    async fn setup_app() -> Router {
+        let state = Arc::new(AppState {
+            models: IndexMap::new(),
+            current: RwLock::new(None),
+            chats_dir: ".".to_string(),
+            speech_dir: ".".to_string(),
+            current_chat: RwLock::new(None),
+            next_chat_id: RwLock::new(1),
+            default_params: crate::types::GenerationParams::default(),
+            search_enabled: false,
+        });
+
+        Router::new()
+            .route("/upload_audio", post(upload_audio))
+            .with_state(state)
+    }
+
+    #[tokio::test]
+    async fn test_upload_audio_invalid_type() {
+        let app = setup_app().await;
+
+        let body = "--boundary\r\n\
+            Content-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\n\
+            Content-Type: text/plain\r\n\
+            \r\n\
+            Some text content\r\n\
+            --boundary--\r\n";
+
+        let request = Request::builder()
+            .uri("/upload_audio")
+            .method("POST")
+            .header("Content-Type", "multipart/form-data; boundary=boundary")
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_upload_audio_no_filename() {
+        let app = setup_app().await;
+
+        let body = "--boundary\r\n\
+            Content-Disposition: form-data; name=\"file\"\r\n\
+            Content-Type: audio/wav\r\n\
+            \r\n\
+            Some audio content\r\n\
+            --boundary--\r\n";
+
+        let request = Request::builder()
+            .uri("/upload_audio")
+            .method("POST")
+            .header("Content-Type", "multipart/form-data; boundary=boundary")
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_upload_audio_unsupported_format() {
+        let app = setup_app().await;
+
+        let body = "--boundary\r\n\
+            Content-Disposition: form-data; name=\"file\"; filename=\"test.exe\"\r\n\
+            Content-Type: audio/wav\r\n\
+            \r\n\
+            Some audio content\r\n\
+            --boundary--\r\n";
+
+        let request = Request::builder()
+            .uri("/upload_audio")
+            .method("POST")
+            .header("Content-Type", "multipart/form-data; boundary=boundary")
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}
