@@ -47,7 +47,6 @@ pub enum AdapterPaths {
         classifier_path: Option<PathBuf>,
         xlora_order: Option<Ordering>,
         xlora_config: Option<XLoraConfig>,
-        lora_preload_adapter_info: Option<HashMap<String, (PathBuf, LoraConfig)>>,
     },
     Lora(Vec<LoraAdapterPaths>),
     None,
@@ -208,67 +207,12 @@ pub fn get_xlora_paths(
                 );
             }
 
-            let lora_preload_adapter_info =
-                // If preload adapters are specified, get their metadata like above
-                if let Some(preload_adapters) = &xlora_order.preload_adapters {
-                    let mut output = HashMap::new();
-                    for adapter in preload_adapters {
-                        // Get the names and remote paths of the files associated with this adapter
-                        let adapter_files = api_dir_list!(api, &adapter.adapter_model_id, true)
-                            .filter_map(|f| {
-                                if f.contains(&adapter.name) {
-                                    Some((f, adapter.name.clone()))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>();
-                        if adapter_files.is_empty() {
-                            anyhow::bail!("Adapter files are empty. Perhaps the ordering file adapters does not match the actual adapters?")
-                        }
-                        // Get local paths for this adapter
-                        let mut adapters_paths: HashMap<String, Vec<PathBuf>> = HashMap::new();
-                        for (file, name) in adapter_files {
-                            if let Some(paths) = adapters_paths.get_mut(&name) {
-                                paths.push(api_get_file!(api, &file, model_id));
-                            } else {
-                                adapters_paths
-                                    .insert(name, vec![api_get_file!(api, &file, model_id)]);
-                            }
-                        }
-
-                        let mut config = None;
-                        let mut safetensor = None;
-
-                        // Sort local paths for the adapter configs and safetensors files
-                        let paths = adapters_paths
-                            .get(&adapter.name)
-                            .unwrap_or_else(|| panic!("Adapter {} not found.", adapter.name));
-                        for path in paths {
-                            if path.extension().unwrap() == "safetensors" {
-                                safetensor = Some(path.to_owned());
-                            } else {
-                                let conf = fs::read_to_string(path)?;
-                                let lora_config: LoraConfig = serde_json::from_str(&conf)?;
-                                config = Some(lora_config);
-                            }
-                        }
-
-                        let (config, safetensor) = (config.unwrap(), safetensor.unwrap());
-                        output.insert(adapter.name.clone(), (safetensor, config));
-                    }
-                    Some(output)
-                } else {
-                    None
-                };
-
             Ok(AdapterPaths::XLora {
                 adapter_configs: Some(adapters_configs),
                 adapter_safetensors: Some(adapters_safetensors),
                 classifier_path,
                 xlora_order: Some(xlora_order.clone()),
                 xlora_config,
-                lora_preload_adapter_info,
             })
         }
         (Some(adapter_ids), None, None) => {
