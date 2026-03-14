@@ -20,7 +20,7 @@ fn convert_slice<T: WithDType>(data: &[u8], shape: &[usize], device: &Device) ->
     } else {
         // XXX: We need to specify `T` here, otherwise the compiler will infer u8 because of the following cast
         // Making this vector too small to fit a full f16/f32/f64 weights, resulting in out-of-bounds access
-        let mut c: Vec<T> = Vec::with_capacity(elem_count);
+        let mut c: Vec<T> = Vec::<T>::with_capacity(elem_count);
         // SAFETY: We just created c, so the allocated memory is necessarily
         // contiguous and non overlapping with the view's data.
         // We're downgrading the `c` pointer from T to u8, which removes alignment
@@ -51,7 +51,7 @@ fn convert_slice_with_cast<T: Sized + Copy, U: WithDType, F: Fn(T) -> Result<U>>
     } else {
         // XXX: We need to specify `T` here, otherwise the compiler will infer u8 because of the following cast
         // Making this vector too small to fit a full f16/f32/f64 weights, resulting in out-of-bounds access
-        let mut c: Vec<T> = Vec::with_capacity(elem_count);
+        let mut c: Vec<T> = Vec::<T>::with_capacity(elem_count);
         // SAFETY: We just created c, so the allocated memory is necessarily
         // contiguous and non overlapping with the view's data.
         // We're downgrading the `c` pointer from T to u8, which removes alignment
