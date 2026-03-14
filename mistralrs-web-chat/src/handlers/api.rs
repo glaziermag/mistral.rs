@@ -619,3 +619,161 @@ pub async fn generate_speech(
             .into_response()
     }
 }
+#[cfg(test)]
+mod tests {
+    use crate::handlers::api::*;
+    use crate::types::{AppState, GenerationParams};
+    use axum::{
+        body::Body,
+        extract::DefaultBodyLimit,
+        http::{header, Request, StatusCode},
+        routing::post,
+        Router,
+    };
+    use indexmap::IndexMap;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+    use tower::ServiceExt;
+
+    async fn test_app() -> Router {
+        let app_state = Arc::new(AppState {
+            models: IndexMap::new(),
+            current: RwLock::new(None),
+            chats_dir: "target/test_chats".to_string(),
+            speech_dir: "target/test_speech".to_string(),
+            current_chat: RwLock::new(None),
+            next_chat_id: RwLock::new(1),
+            default_params: GenerationParams::default(),
+            search_enabled: false,
+        });
+
+        Router::new()
+            .route("/upload_audio", post(upload_audio))
+            // Apply a limit to trigger the exceeded error
+            .layer(DefaultBodyLimit::max(1024))
+            .with_state(app_state)
+    }
+
+    #[tokio::test]
+    async fn test_upload_audio_exceeds_limit() {
+        let app = test_app().await;
+
+        let mut body = "\
+--boundary\r\n\
+Content-Disposition: form-data; name=\"file\"; filename=\"test.wav\"\r\n\
+Content-Type: audio/wav\r\n\
+\r\n\
+"
+        .to_string();
+        body.push_str(&"A".repeat(2048));
+        body.push_str("\r\n--boundary--\r\n");
+
+        let req = Request::builder()
+            .uri("/upload_audio")
+            .method("POST")
+            .header(
+                header::CONTENT_TYPE,
+                "multipart/form-data; boundary=boundary",
+            )
+            .body(Body::from(body))
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        // Since the body limit intercepts via layer or multipart stream, it could be BAD_REQUEST or PAYLOAD_TOO_LARGE
+        let status = res.status();
+        assert!(status == StatusCode::BAD_REQUEST || status == StatusCode::PAYLOAD_TOO_LARGE);
+
+        // Actually, we can test missing part or unsupported format more reliably for error paths inside the handler!
+    }
+
+    #[tokio::test]
+    async fn test_upload_audio_missing_part() {
+        let app = test_app().await;
+
+        let body = "\
+--boundary--\r\n\
+";
+
+        let req = Request::builder()
+            .uri("/upload_audio")
+            .method("POST")
+            .header(
+                header::CONTENT_TYPE,
+                "multipart/form-data; boundary=boundary",
+            )
+            .body(Body::from(body))
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(bytes, "missing audio part".as_bytes());
+    }
+
+    #[tokio::test]
+    async fn test_upload_audio_unsupported_format() {
+        let app = test_app().await;
+
+        let body = "\
+--boundary\r\n\
+Content-Disposition: form-data; name=\"file\"; filename=\"test.invalid\"\r\n\
+Content-Type: audio/invalid\r\n\
+\r\n\
+some data\r\n\
+--boundary--\r\n\
+";
+
+        let req = Request::builder()
+            .uri("/upload_audio")
+            .method("POST")
+            .header(
+                header::CONTENT_TYPE,
+                "multipart/form-data; boundary=boundary",
+            )
+            .body(Body::from(body))
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(bytes, "Unsupported audio format".as_bytes());
+    }
+
+    #[tokio::test]
+    async fn test_upload_audio_no_filename() {
+        let app = test_app().await;
+
+        let body = "\
+--boundary\r\n\
+Content-Disposition: form-data; name=\"file\"\r\n\
+Content-Type: audio/wav\r\n\
+\r\n\
+some data\r\n\
+--boundary--\r\n\
+";
+
+        let req = Request::builder()
+            .uri("/upload_audio")
+            .method("POST")
+            .header(
+                header::CONTENT_TYPE,
+                "multipart/form-data; boundary=boundary",
+            )
+            .body(Body::from(body))
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(bytes, "No filename provided".as_bytes());
+    }
+}
