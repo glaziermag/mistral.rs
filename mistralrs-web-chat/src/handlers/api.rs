@@ -619,3 +619,104 @@ pub async fn generate_speech(
             .into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, header},
+        routing::post,
+        Router,
+        extract::DefaultBodyLimit,
+    };
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    use std::sync::Arc;
+    use indexmap::IndexMap;
+    use tokio::sync::RwLock;
+    use crate::types::{AppState, GenerationParams};
+
+    fn create_mock_app_state() -> Arc<AppState> {
+        Arc::new(AppState {
+            models: IndexMap::new(),
+            current: RwLock::new(None),
+            chats_dir: "mock_chats".to_string(),
+            speech_dir: "mock_speech".to_string(),
+            current_chat: RwLock::new(None),
+            next_chat_id: RwLock::new(1),
+            default_params: GenerationParams {
+                temperature: 0.7,
+                top_p: 0.9,
+                top_k: 40,
+                max_tokens: 2048,
+                repetition_penalty: 1.1,
+                system_prompt: None,
+            },
+            search_enabled: false,
+        })
+    }
+
+    #[tokio::test]
+    async fn test_upload_image_too_large() {
+        let app_state = create_mock_app_state();
+        let app = Router::new()
+            .route("/api/upload_image", post(upload_image))
+            .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // Needs a higher limit so it gets past the axum limit to our limit
+            .with_state(app_state);
+
+        let boundary = "boundary123";
+        let mut multipart_body = Vec::new();
+        multipart_body.extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
+        multipart_body.extend_from_slice(b"Content-Disposition: form-data; name=\"file\"; filename=\"test.jpg\"\r\n");
+        multipart_body.extend_from_slice(b"Content-Type: image/jpeg\r\n\r\n");
+        // Create an image that is slightly over 50MB (the limit in upload_image)
+        multipart_body.extend_from_slice(&vec![0u8; 50 * 1024 * 1024 + 1]);
+        multipart_body.extend_from_slice(format!("\r\n--{}--\r\n", boundary).as_bytes());
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/upload_image")
+            .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={}", boundary))
+            .body(Body::from(multipart_body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body_text = String::from_utf8_lossy(&body_bytes);
+        assert_eq!(body_text, "image too large (limit 50 MB)");
+    }
+
+    #[tokio::test]
+    async fn test_upload_image_invalid_image_file() {
+        let app_state = create_mock_app_state();
+        let app = Router::new()
+            .route("/api/upload_image", post(upload_image))
+            .with_state(app_state);
+
+        let body = "--boundary\r\n\
+                    Content-Disposition: form-data; name=\"file\"; filename=\"test.jpg\"\r\n\
+                    Content-Type: image/jpeg\r\n\
+                    \r\n\
+                    not a valid image data\r\n\
+                    --boundary--\r\n";
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/upload_image")
+            .header(header::CONTENT_TYPE, "multipart/form-data; boundary=boundary")
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body_text = String::from_utf8_lossy(&body_bytes);
+        assert_eq!(body_text, "invalid image file");
+    }
+}
