@@ -122,11 +122,7 @@ where
                 if let mistralrs::Response::Chunk(resp) = chunk {
                     if let Some(choice) = resp.choices.first() {
                         if let Some(token) = &choice.delta.content {
-                            if socket
-                                .send(Message::Text(token.clone().into()))
-                                .await
-                                .is_err()
-                            {
+                            if socket.send(Message::from(token.as_str())).await.is_err() {
                                 break;
                             }
                             assistant_reply.push_str(token);
