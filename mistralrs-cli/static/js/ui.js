@@ -42,7 +42,7 @@ function isAllowedTextFile(file) {
 function initTextareaResize() {
   const input = document.getElementById('input');
   // ✅ FIX: Make consistent with CSS max-height: calc(1.4em * 15)
-  const maxH = parseFloat(getComputedStyle(input).lineHeight) * 15;
+  const maxH = parseFloat(getComputedStyle(input).fontSize) * 1.4 * 15;
   
   function fit() { 
     input.style.height = 'auto'; 
