@@ -112,6 +112,15 @@ pub(crate) fn parse_image_url(url_unparsed: &str) -> PyApiResult<DynamicImage> {
             .to_file_path()
             .map_err(|_| format!("Could not parse file path: {url}"))?;
 
+        let cwd = std::env::current_dir().map_err(|e| format!("Could not get current directory: {e}"))?;
+        let abs_path = std::path::absolute(&path).map_err(|e| format!("Could not get absolute path: {e}"))?;
+
+        if !abs_path.starts_with(&cwd) {
+            return Err(PyApiErr::from(format!(
+                "Access denied: Local file path is outside the current working directory: {url}"
+            )));
+        }
+
         if let Ok(mut f) = File::open(&path) {
             // Read from local file
             let metadata = fs::metadata(&path)?;
@@ -167,6 +176,15 @@ pub(crate) fn parse_audio_url(url_unparsed: &str) -> PyApiResult<AudioInput> {
         let path = url
             .to_file_path()
             .map_err(|_| format!("Could not parse file path: {url}"))?;
+
+        let cwd = std::env::current_dir().map_err(|e| format!("Could not get current directory: {e}"))?;
+        let abs_path = std::path::absolute(&path).map_err(|e| format!("Could not get absolute path: {e}"))?;
+
+        if !abs_path.starts_with(&cwd) {
+            return Err(PyApiErr::from(format!(
+                "Access denied: Local file path is outside the current working directory: {url}"
+            )));
+        }
 
         if let Ok(mut f) = File::open(&path) {
             let metadata = fs::metadata(&path)?;
