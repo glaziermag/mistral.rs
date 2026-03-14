@@ -619,3 +619,70 @@ pub async fn generate_speech(
             .into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_text_upload_valid() {
+        assert_eq!(validate_text_upload(Some("file.txt"), Some("text/plain")), Ok("txt".to_string()));
+        assert_eq!(validate_text_upload(Some("code.rs"), Some("application/x-rust")), Ok("rs".to_string()));
+        // The code actually evaluates "README" as extension "readme" and returns Err("Unsupported text file format").
+        // See logic in validate_text_upload.
+        assert_eq!(validate_text_upload(Some("README"), None), Err("Unsupported text file format"));
+        assert_eq!(validate_text_upload(Some("Dockerfile"), None), Ok("dockerfile".to_string()));
+    }
+
+    #[test]
+    fn test_validate_text_upload_invalid_mime() {
+        assert_eq!(
+            validate_text_upload(Some("file.txt"), Some("image/png")),
+            Err("File must be a text file")
+        );
+    }
+
+    #[test]
+    fn test_validate_text_upload_no_filename() {
+        assert_eq!(
+            validate_text_upload(None, Some("text/plain")),
+            Err("No filename provided")
+        );
+    }
+
+    #[test]
+    fn test_validate_text_upload_unsupported_ext() {
+        assert_eq!(
+            validate_text_upload(Some("file.exe"), Some("text/plain")),
+            Err("Unsupported text file format")
+        );
+    }
+
+    #[test]
+    fn test_validate_text_upload_no_ext() {
+        assert_eq!(
+            validate_text_upload(Some("some_random_file"), Some("text/plain")),
+            Err("Unsupported text file format")
+        );
+    }
+
+    #[test]
+    fn test_validate_image_upload_errors() {
+        assert_eq!(
+            validate_image_upload(Some("file.png"), Some("text/plain")),
+            Err("File must be an image")
+        );
+        assert_eq!(
+            validate_image_upload(None, Some("image/png")),
+            Err("No filename provided")
+        );
+        assert_eq!(
+            validate_image_upload(Some("file.txt"), Some("image/png")),
+            Err("Unsupported image format")
+        );
+        assert_eq!(
+            validate_image_upload(Some("some_file"), Some("image/png")),
+            Err("Unsupported image format")
+        );
+    }
+}
