@@ -42,6 +42,7 @@ mime_guess.workspace = true
 include_dir.workspace = true
 http.workspace = true
 hyper.workspace = true
+tower = "0.5.3"
 
 [features]
 cuda = ["mistralrs/cuda"]
