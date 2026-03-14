@@ -130,7 +130,7 @@ function handleWebSocketMessage(ev) {
   }
 
   assistantBuf += ev.data;
-  assistantDiv.innerHTML = renderMarkdown(assistantBuf);
+  assistantDiv.innerHTML = DOMPurify.sanitize(renderMarkdown(assistantBuf));
   addCopyBtns(assistantDiv);
   fixLinks(assistantDiv);
   // Auto-scroll only if the user is already near the bottom
