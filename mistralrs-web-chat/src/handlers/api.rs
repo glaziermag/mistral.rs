@@ -619,3 +619,63 @@ pub async fn generate_speech(
             .into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::{Request, FromRequest};
+    use axum::http::header::{CONTENT_TYPE, CONTENT_LENGTH};
+
+
+
+    use indexmap::IndexMap;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    #[tokio::test]
+    async fn test_upload_audio_create_dir_error() {
+        // Set XDG_CACHE_HOME to a file instead of a directory to force create_dir_all to fail.
+        let temp_dir = std::env::temp_dir();
+        let dummy_file_path = temp_dir.join(format!("dummy_file_{}", Uuid::new_v4()));
+        tokio::fs::write(&dummy_file_path, b"").await.unwrap();
+
+        std::env::set_var("XDG_CACHE_HOME", &dummy_file_path);
+
+        let app_state = Arc::new(AppState {
+            models: IndexMap::new(),
+            current: RwLock::new(None),
+            chats_dir: temp_dir.to_string_lossy().to_string(),
+            speech_dir: temp_dir.to_string_lossy().to_string(),
+            current_chat: RwLock::new(None),
+            next_chat_id: RwLock::new(0),
+            default_params: crate::types::GenerationParams::default(),
+            search_enabled: false,
+        });
+
+        // Create a multipart body
+        let boundary = "------------------------1234567890";
+        let body = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"test.wav\"\r\nContent-Type: audio/wav\r\n\r\naudio data\r\n--{boundary}--\r\n",
+        );
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/upload_audio")
+            .header(CONTENT_TYPE, format!("multipart/form-data; boundary={}", boundary))
+            .header(CONTENT_LENGTH, body.len())
+            .body(axum::body::Body::from(body))
+            .unwrap();
+
+        let multipart = axum::extract::Multipart::from_request(req, &()).await.unwrap();
+
+        let res = upload_audio(State(app_state), multipart).await.into_response();
+
+        // The status should be INTERNAL_SERVER_ERROR because get_cache_dir().join("uploads")
+        // fails to create since get_cache_dir() (the dummy file) exists as a file.
+        assert_eq!(res.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+
+        // Cleanup
+        std::env::remove_var("XDG_CACHE_HOME");
+        let _ = tokio::fs::remove_file(&dummy_file_path).await;
+    }
+}
