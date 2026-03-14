@@ -806,14 +806,12 @@ macro_rules! xlora_model_loader {
         $multi_progress:expr,
         $matformer_config:expr,
     ) => {{
-        // TODO: remove lora_preload_adapter_info
         let $crate::pipeline::AdapterPaths::XLora {
             adapter_configs,
             adapter_safetensors,
             classifier_path,
             xlora_order,
             xlora_config,
-            lora_preload_adapter_info: _,
         } = $paths.get_adapter_paths()
         else {
             unreachable!()

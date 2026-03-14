@@ -1,6 +1,4 @@
-use super::varbuilder_utils::{
-    from_mmaped_safetensors, load_preload_adapters, DeviceForLoadTensor,
-};
+use super::varbuilder_utils::{from_mmaped_safetensors, DeviceForLoadTensor};
 use anyhow::Result;
 use candle_core::{quantized::ggml_file, DType};
 use mistralrs_quant::ShardedVarBuilder;
@@ -54,7 +52,6 @@ impl<'a> Adapter<'a> {
             classifier_path,
             xlora_order,
             xlora_config,
-            lora_preload_adapter_info,
         } = paths.get_adapter_paths()
         else {
             todo!()
@@ -62,12 +59,7 @@ impl<'a> Adapter<'a> {
 
         let lora_config = adapter_configs.as_ref().unwrap();
         let ordering = xlora_order.as_ref().unwrap();
-        let preload_adapters = load_preload_adapters(
-            lora_preload_adapter_info,
-            candle_core::DType::F32,
-            device,
-            silent,
-        )?;
+        let preload_adapters = None;
 
         // X-LoRA support:
         let mut xlora_paths: Vec<PathBuf> = vec![];
