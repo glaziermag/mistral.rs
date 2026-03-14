@@ -619,3 +619,74 @@ pub async fn generate_speech(
             .into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_image_upload() {
+        // Valid images
+        assert_eq!(validate_image_upload(Some("test.jpg"), Some("image/jpeg")), Ok("jpg".to_string()));
+        assert_eq!(validate_image_upload(Some("test.png"), Some("image/png")), Ok("png".to_string()));
+        assert_eq!(validate_image_upload(Some("test.JPEG"), Some("image/jpeg")), Ok("jpeg".to_string()));
+
+        // Missing content type but valid extension
+        assert_eq!(validate_image_upload(Some("test.jpg"), None), Ok("jpg".to_string()));
+
+        // Error paths
+        assert_eq!(
+            validate_image_upload(Some("test.jpg"), Some("text/plain")),
+            Err("File must be an image")
+        );
+        assert_eq!(
+            validate_image_upload(None, Some("image/jpeg")),
+            Err("No filename provided")
+        );
+        assert_eq!(
+            validate_image_upload(Some("test"), Some("image/jpeg")),
+            Err("Unsupported image format")
+        );
+        assert_eq!(
+            validate_image_upload(Some("test."), Some("image/jpeg")),
+            Err("No file extension")
+        );
+        assert_eq!(
+            validate_image_upload(Some("test.txt"), Some("image/jpeg")),
+            Err("Unsupported image format")
+        );
+    }
+
+    #[test]
+    fn test_validate_audio_upload() {
+        // Valid audio
+        assert_eq!(validate_audio_upload(Some("test.wav"), Some("audio/wav")), Ok("wav".to_string()));
+        assert_eq!(validate_audio_upload(Some("test.mp3"), Some("audio/mpeg")), Ok("mp3".to_string()));
+        assert_eq!(validate_audio_upload(Some("test.WAV"), Some("audio/wav")), Ok("wav".to_string()));
+
+        // Missing content type but valid extension
+        assert_eq!(validate_audio_upload(Some("test.wav"), None), Ok("wav".to_string()));
+
+        // Error paths
+        assert_eq!(
+            validate_audio_upload(Some("test.wav"), Some("text/plain")),
+            Err("File must be an audio file")
+        );
+        assert_eq!(
+            validate_audio_upload(None, Some("audio/wav")),
+            Err("No filename provided")
+        );
+        assert_eq!(
+            validate_audio_upload(Some("test"), Some("audio/wav")),
+            Err("Unsupported audio format")
+        );
+        assert_eq!(
+            validate_audio_upload(Some("test."), Some("audio/wav")),
+            Err("No file extension")
+        );
+        assert_eq!(
+            validate_audio_upload(Some("test.txt"), Some("audio/wav")),
+            Err("Unsupported audio format")
+        );
+    }
+}
