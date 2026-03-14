@@ -51,3 +51,6 @@ flash-attn = ["cuda", "mistralrs/flash-attn"]
 accelerate = ["mistralrs/accelerate"]
 mkl = ["mistralrs/mkl"]
 nccl = ["mistralrs/nccl"]
+
+[dev-dependencies]
+tower = { version = "0.5.3", features = ["util"] }
