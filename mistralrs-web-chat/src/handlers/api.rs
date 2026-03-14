@@ -619,3 +619,71 @@ pub async fn generate_speech(
             .into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::{to_bytes, Body};
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+    use crate::types::GenerationParams;
+    use indexmap::IndexMap;
+    use tokio::sync::RwLock;
+
+    #[test]
+    fn test_validate_audio_upload() {
+        assert_eq!(validate_audio_upload(Some("test.wav"), Some("audio/wav")), Ok("wav".to_string()));
+        assert_eq!(validate_audio_upload(Some("test.mp3"), Some("audio/mpeg")), Ok("mp3".to_string()));
+
+        // Errors
+        assert_eq!(validate_audio_upload(Some("test.txt"), Some("text/plain")), Err("File must be an audio file"));
+        assert_eq!(validate_audio_upload(Some("test"), Some("audio/wav")), Err("Unsupported audio format"));
+        assert_eq!(validate_audio_upload(None, Some("audio/wav")), Err("No filename provided"));
+        assert_eq!(validate_audio_upload(Some("test.pdf"), Some("audio/wav")), Err("Unsupported audio format"));
+    }
+
+    #[tokio::test]
+    async fn test_upload_audio_missing_part() {
+        let app_state = Arc::new(AppState {
+            models: IndexMap::new(),
+            current: RwLock::new(None),
+            chats_dir: "dummy_chats".to_string(),
+            speech_dir: "dummy_speech".to_string(),
+            current_chat: RwLock::new(None),
+            next_chat_id: RwLock::new(1),
+            default_params: GenerationParams {
+                temperature: 0.7,
+                top_p: 1.0,
+                top_k: 40,
+                max_tokens: 1024,
+                repetition_penalty: 1.1,
+                system_prompt: None,
+            },
+            search_enabled: false,
+        });
+
+        // Create an empty multipart request (boundary but no parts)
+        // A valid empty multipart body requires an ending boundary
+        let body = Body::from("--boundary--\r\n");
+        let request = Request::builder()
+            .method("POST")
+            .uri("/upload_audio")
+            .header("content-type", "multipart/form-data; boundary=boundary")
+            .body(body)
+            .unwrap();
+
+        // Route to the handler using the State
+        let router = axum::Router::new()
+            .route("/upload_audio", axum::routing::post(upload_audio))
+            .with_state(app_state);
+
+        let response = router.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body_bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(body_bytes.as_ref(), b"missing audio part");
+    }
+}
