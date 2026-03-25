@@ -1507,6 +1507,65 @@ impl MistralRs {
             .map_err(|_| MistralRsError::EnginePoisoned)?;
         unloaded.insert(resolved_model_id.to_string(), unloaded_state);
 
+        let device = engine_instance.config.device.clone();
+
+        // The Engine asynchronous worker loop has finished dropping inner variables.
+        let _ = engine_instance.engine_handler.join();
+
+        // We MUST bind to the device context BEFORE dropping the state!
+        // Tensors drop on the HTTP thread naturally here; cudarc requires the CUDA OS context 
+        // to be bounded for cuMemFreeAsync to execute natively without silently aborting into the memory pool void.
+        #[cfg(feature = "cuda")]
+        let _ctx_guard = {
+            if let candle_core::Device::Cuda(dev) = &device {
+                dev.cuda_stream().context().bind_to_thread().ok()
+            } else {
+                None
+            }
+        };
+
+        drop(engine_instance.reboot_state);
+        let _ = device.synchronize();
+
+        // Release idle capacity from the CUDA memory pool without disturbing
+        // live allocations from other models that may share the same pool.
+        //
+        // cuMemPoolTrimTo(pool, 0) is too aggressive — it returns ALL cached
+        // capacity to the OS, including blocks that other active models may be
+        // about to reuse. Instead, query the currently-used bytes and trim only
+        // to that watermark, releasing just the over-reserved idle buffer.
+        //
+        // If the attribute query fails (old driver, non-default pool type), we
+        // skip the trim entirely; the OS will reclaim the memory naturally when
+        // the pool refcount drops to zero.
+        #[cfg(feature = "cuda")]
+        if let candle_core::Device::Cuda(dev) = &device {
+            unsafe {
+                use candle_core::cuda::cudarc::driver::sys;
+                if let Ok(_ctx) = dev.cuda_stream().context().bind_to_thread() {
+                    let mut dev_id = 0;
+                    if sys::cuCtxGetDevice(&mut dev_id) == sys::CUresult::CUDA_SUCCESS {
+                        let mut pool: sys::CUmemoryPool = std::ptr::null_mut();
+                        if sys::cuDeviceGetDefaultMemPool(&mut pool, dev_id) == sys::CUresult::CUDA_SUCCESS {
+                            // Query how many bytes are currently in active use.
+                            let mut used_bytes: u64 = 0;
+                            let attr_ok = sys::cuMemPoolGetAttribute(
+                                pool,
+                                sys::CUmemPool_attribute::CU_MEMPOOL_ATTR_USED_MEM_CURRENT,
+                                &mut used_bytes as *mut u64 as *mut std::ffi::c_void,
+                            );
+                            if attr_ok == sys::CUresult::CUDA_SUCCESS {
+                                // Trim to currently-used bytes: releases idle reserve only.
+                                sys::cuMemPoolTrimTo(pool, used_bytes as usize);
+                            }
+                            // If the attribute query fails, skip the trim and let the OS
+                            // reclaim memory through normal refcount-based pool eviction.
+                        }
+                    }
+                }
+            }
+        }
+
         // Update default if needed
         let mut default_lock = self
             .default_engine_id
