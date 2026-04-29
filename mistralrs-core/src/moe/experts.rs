@@ -183,6 +183,7 @@ impl MoEExperts {
         Ok(Self {
             backend: backend_impl,
             act,
+            #[cfg(feature = "cuda")]
             num_experts: cfg.num_experts,
             num_experts_per_tok: cfg.num_experts_per_tok,
             all_reduce: SumAllReduce::new(comm),
@@ -250,6 +251,7 @@ impl MoEExperts {
         Ok(Self {
             backend: backend_impl,
             act,
+            #[cfg(feature = "cuda")]
             num_experts: cfg.num_experts,
             num_experts_per_tok: cfg.num_experts_per_tok,
             all_reduce: SumAllReduce::new(comm),

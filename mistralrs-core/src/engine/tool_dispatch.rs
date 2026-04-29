@@ -98,6 +98,7 @@ pub(super) async fn execute_search(
         t_cap.elapsed().as_secs_f32()
     );
 
+    // Sort by token length (shortest first).
     let mut combined: Vec<(SearchResult, usize)> =
         results.into_iter().zip(result_token_lens).collect();
     combined.sort_by_key(|(_, len)| *len);
