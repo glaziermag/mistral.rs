@@ -95,6 +95,7 @@ struct SlowExpertsWeights {
 pub struct MoEExperts {
     backend: MoEExpertsBackendImpl,
     act: Activation,
+    #[cfg(feature = "cuda")]
     num_experts: usize,
     num_experts_per_tok: usize,
     all_reduce: SumAllReduce,
@@ -182,6 +183,7 @@ impl MoEExperts {
         Ok(Self {
             backend: backend_impl,
             act,
+            #[cfg(feature = "cuda")]
             num_experts: cfg.num_experts,
             num_experts_per_tok: cfg.num_experts_per_tok,
             all_reduce: SumAllReduce::new(comm),
@@ -249,6 +251,7 @@ impl MoEExperts {
         Ok(Self {
             backend: backend_impl,
             act,
+            #[cfg(feature = "cuda")]
             num_experts: cfg.num_experts,
             num_experts_per_tok: cfg.num_experts_per_tok,
             all_reduce: SumAllReduce::new(comm),

@@ -36,7 +36,10 @@ extend-ignore-re = [
 ]
 
 [default.extend-words]
+"cpy" = "cpy"
 "layrnorm" = "layrnorm"
+"OPTIN" = "OPTIN"
+"ue" = "ue"
 
 [type.rust.extend-identifiers]
 "arange" = "arange"
