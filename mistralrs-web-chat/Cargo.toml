@@ -43,6 +43,9 @@ include_dir.workspace = true
 http.workspace = true
 hyper.workspace = true
 
+[dev-dependencies]
+tower = { version = "0.5.3", features = ["util"] }
+
 [features]
 cuda = ["mistralrs/cuda"]
 cudnn = ["mistralrs/cudnn"]
