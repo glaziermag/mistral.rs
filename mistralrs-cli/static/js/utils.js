@@ -41,7 +41,12 @@ function renderMarkdown(src) {
     return seg.startsWith('`') ? seg : escape(seg);
   }).join('');
 
-  return marked.parse(escaped);
+  const html = marked.parse(escaped);
+  if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
+    throw new Error('DOMPurify must be loaded before rendering markdown');
+  }
+
+  return DOMPurify.sanitize(html);
 }
 
 /**
