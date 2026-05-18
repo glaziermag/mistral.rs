@@ -18,9 +18,8 @@ fn convert_slice<T: WithDType>(data: &[u8], shape: &[usize], device: &Device) ->
             unsafe { std::slice::from_raw_parts(data.as_ptr() as *const T, elem_count) };
         Tensor::from_slice(data, shape, device)
     } else {
-        // XXX: We need to specify `T` here, otherwise the compiler will infer u8 because of the following cast
-        // Making this vector too small to fit a full f16/f32/f64 weights, resulting in out-of-bounds access
-        let mut c: Vec<T> = Vec::with_capacity(elem_count);
+        // Keep the allocation element type explicit near the byte-copy cast.
+        let mut c = Vec::<T>::with_capacity(elem_count);
         // SAFETY: We just created c, so the allocated memory is necessarily
         // contiguous and non overlapping with the view's data.
         // We're downgrading the `c` pointer from T to u8, which removes alignment
@@ -49,9 +48,8 @@ fn convert_slice_with_cast<T: Sized + Copy, U: WithDType, F: Fn(T) -> Result<U>>
         let data = data.iter().map(|t| conv(*t)).collect::<Result<Vec<_>>>()?;
         Tensor::from_vec(data, shape, device)
     } else {
-        // XXX: We need to specify `T` here, otherwise the compiler will infer u8 because of the following cast
-        // Making this vector too small to fit a full f16/f32/f64 weights, resulting in out-of-bounds access
-        let mut c: Vec<T> = Vec::with_capacity(elem_count);
+        // Keep the allocation element type explicit near the byte-copy cast.
+        let mut c = Vec::<T>::with_capacity(elem_count);
         // SAFETY: We just created c, so the allocated memory is necessarily
         // contiguous and non overlapping with the view's data.
         // We're downgrading the `c` pointer from T to u8, which removes alignment
@@ -62,6 +60,56 @@ fn convert_slice_with_cast<T: Sized + Copy, U: WithDType, F: Fn(T) -> Result<U>>
         }
         let c = c.into_iter().map(conv).collect::<Result<Vec<_>>>()?;
         Tensor::from_vec(c, shape, device)
+    }
+}
+
+#[cfg(test)]
+mod unsafe_copy_tests {
+    use super::*;
+
+    fn unaligned_f32_bytes(values: &[f32]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(1 + std::mem::size_of_val(values));
+        bytes.push(0);
+        for value in values {
+            bytes.extend_from_slice(&value.to_ne_bytes());
+        }
+        bytes
+    }
+
+    fn unaligned_f16_bytes(values: &[half::f16]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(1 + std::mem::size_of_val(values));
+        bytes.push(0);
+        for value in values {
+            bytes.extend_from_slice(&value.to_bits().to_ne_bytes());
+        }
+        bytes
+    }
+
+    #[test]
+    fn convert_slice_handles_unaligned_f32_data() {
+        let values = [1.25_f32, -2.5, 3.75];
+        let bytes = unaligned_f32_bytes(&values);
+        let data = &bytes[1..];
+        assert!(!(data.as_ptr() as usize).is_multiple_of(std::mem::size_of::<f32>()));
+        let tensor = convert_slice::<f32>(data, &[values.len()], &Device::Cpu).unwrap();
+        assert_eq!(tensor.to_vec1::<f32>().unwrap(), values.to_vec());
+    }
+
+    #[test]
+    fn convert_slice_with_cast_handles_unaligned_f16_to_f32_data() {
+        let expected = [1.25_f32, -2.5, 3.75];
+        let values = expected.map(half::f16::from_f32);
+        let bytes = unaligned_f16_bytes(&values);
+        let data = &bytes[1..];
+        assert!(!(data.as_ptr() as usize).is_multiple_of(std::mem::size_of::<half::f16>()));
+        let tensor = convert_slice_with_cast::<half::f16, f32, _>(
+            data,
+            &[values.len()],
+            &Device::Cpu,
+            |x| Ok(x.to_f32()),
+        )
+        .unwrap();
+        assert_eq!(tensor.to_vec1::<f32>().unwrap(), expected.to_vec());
     }
 }
 
