@@ -63,6 +63,23 @@ pub struct Topology {
     pub patterns: Vec<(Regex, LayerTopology)>,
 }
 
+fn fill_layer_range(
+    layers: &mut Vec<Option<LayerTopology>>,
+    range: Range<usize>,
+    layer: LayerTopology,
+) {
+    if range.end <= range.start {
+        return;
+    }
+
+    if layers.len() < range.end {
+        layers.resize_with(range.end, || None);
+    }
+
+    layers[range.start..range.end - 1].fill_with(|| Some(layer.clone()));
+    layers[range.end - 1] = Some(layer);
+}
+
 impl Topology {
     /// Create an empty topology.
     pub fn empty() -> Self {
@@ -90,13 +107,7 @@ impl Topology {
     }
 
     pub fn with_range(mut self, range: Range<usize>, layer: LayerTopology) -> Self {
-        if self.layers.len() < range.end {
-            self.layers
-                .extend(vec![None; range.end - self.layers.len()]);
-        }
-        for i in range.start..range.end {
-            self.layers[i] = Some(layer.clone());
-        }
+        fill_layer_range(&mut self.layers, range, layer);
         self
     }
 
@@ -188,9 +199,7 @@ impl Topology {
             Self::with_capacity(capacity)
         };
         for (range, layer) in range_layers {
-            for i in range.start..range.end {
-                this.layers[i] = Some(layer.clone());
-            }
+            fill_layer_range(&mut this.layers, range.into(), layer);
         }
         this.patterns = pattern_layers;
         Ok(this)
@@ -254,6 +263,43 @@ mod tests {
         topology
             .layer_for(layer)
             .and_then(|lt| lt.isq.as_ref().copied())
+    }
+
+    fn topology_layer(isq: IsqType) -> LayerTopology {
+        LayerTopology {
+            isq: Some(isq),
+            device: None,
+        }
+    }
+
+    #[test]
+    fn with_range_extends_and_overwrites_expected_layers() {
+        let topology = Topology::empty().with_range(1..4, topology_layer(IsqType::Q4K));
+
+        assert_eq!(topology.layers.len(), 4);
+        assert!(topology.layer_for(0).is_none());
+        assert_eq!(layer_isq(&topology, 1), Some(IsqType::Q4K));
+        assert_eq!(layer_isq(&topology, 3), Some(IsqType::Q4K));
+
+        let topology = topology.with_range(2..3, topology_layer(IsqType::Q6K));
+
+        assert_eq!(topology.layers.len(), 4);
+        assert_eq!(layer_isq(&topology, 1), Some(IsqType::Q4K));
+        assert_eq!(layer_isq(&topology, 2), Some(IsqType::Q6K));
+        assert_eq!(layer_isq(&topology, 3), Some(IsqType::Q4K));
+    }
+
+    #[test]
+    fn with_range_preserves_empty_and_reversed_range_noop() {
+        let topology = Topology::empty()
+            .with_range(0..2, topology_layer(IsqType::Q4K))
+            .with_range(2..2, topology_layer(IsqType::Q6K))
+            .with_range(3..1, topology_layer(IsqType::Q6K));
+
+        assert_eq!(topology.layers.len(), 2);
+        assert_eq!(layer_isq(&topology, 0), Some(IsqType::Q4K));
+        assert_eq!(layer_isq(&topology, 1), Some(IsqType::Q4K));
+        assert!(topology.layer_for(2).is_none());
     }
 
     #[test]
