@@ -122,11 +122,7 @@ where
                 if let mistralrs::Response::Chunk(resp) = chunk {
                     if let Some(choice) = resp.choices.first() {
                         if let Some(token) = &choice.delta.content {
-                            if socket
-                                .send(Message::Text(token.clone().into()))
-                                .await
-                                .is_err()
-                            {
+                            if socket.send(Message::from(token.as_str())).await.is_err() {
                                 break;
                             }
                             assistant_reply.push_str(token);
@@ -199,6 +195,23 @@ fn validate_audio_path(path: &str) -> Result<String, &'static str> {
             Err(_) => Err("Uploads directory not found"),
         },
         Err(_) => Err("Invalid file path"),
+    }
+}
+
+#[cfg(test)]
+mod websocket_message_tests {
+    use super::*;
+
+    #[test]
+    fn message_from_str_matches_text_clone_payload() {
+        let token = String::from("hello <b>world</b>\nplain text");
+        let old_message = Message::Text(token.clone().into());
+        let new_message = Message::from(token.as_str());
+
+        match (old_message, new_message) {
+            (Message::Text(old), Message::Text(new)) => assert_eq!(old, new),
+            (old, new) => panic!("expected text messages, got {old:?} and {new:?}"),
+        }
     }
 }
 
